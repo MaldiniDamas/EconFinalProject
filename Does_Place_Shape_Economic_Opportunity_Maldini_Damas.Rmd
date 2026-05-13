@@ -1,0 +1,312 @@
+---
+title: "Econ 565 Final Project"
+author: "Maldini"
+output: html_document
+--- 
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#Does Place Shape Economic Opportunity? 
+
+```{r hidden data/CleanUp, include = FALSE}
+library(tidyverse)
+library(broom) 
+library(modelsummary) 
+
+# ------------------------------------------------------------ 
+# 1. Download raw data from Census / Opportunity Atlas 
+# ------------------------------------------------------------
+outcomes_url <- "https://www2.census.gov/ces/opportunity/county_outcomes_simple.csv"
+covars_url <- "https://www2.census.gov/ces/opportunity/cty_covariates.csv"
+names_url <- "https://www2.census.gov/geo/docs/reference/codes/files/national_county.txt" 
+
+outcomes <- read_csv(outcomes_url, show_col_types = FALSE)
+covars <- read_csv(covars_url, show_col_types = FALSE)
+
+county_names <- read_csv( 
+names_url, 
+col_names = c("state_abbr", "state", "county", "county_name", "classfp"), 
+show_col_types = FALSE )   
+
+# ------------------------------------------------------------ 
+# 2. Fix state and county codes before merging 
+#------------------------------------------------------------ 
+# The Opportunity Atlas files read state/county as numbers. 
+# The county-name file reads state/county as text. 
+# We make all of them numeric so the joins work. 
+outcomes <- outcomes %>%
+mutate( state = as.numeric(state), county = as.numeric(county) )
+
+covars <- covars %>%
+mutate( state = as.numeric(state), 
+county = as.numeric(county) 
+)  
+
+county_names <- county_names %>% 
+mutate( state = as.numeric(state), 
+county = as.numeric(county) 
+) 
+
+# ------------------------------------------------------------ 
+# 3. Merge outcomes, covariates, and county names 
+# ------------------------------------------------------------  
+mobility <- outcomes %>%   
+inner_join(covars, by = c("state", "county", "cz", "czname")) %>%   
+left_join(     county_names %>% select(state_abbr, state, county, county_name), 
+by = c("state", "county")   ) 
+
+# ------------------------------------------------------------ 
+# 4. Add Census region using state FIPS codes 
+# ------------------------------------------------------------ 
+mobility <- mobility %>%   
+mutate(     region = case_when(      
+state %in% c(9, 23, 25, 33, 44, 50, 34, 36, 42) ~ "Northeast",  
+state %in% c(18, 17, 26, 39, 55, 19, 20, 27, 29, 31, 38, 46) ~ "Midwest",
+state %in% c(10, 11, 12, 13, 24, 37, 45, 51, 54, 1, 21, 28, 47, 5, 22, 40, 48) ~ "South", 
+state %in% c(4, 8, 16, 35, 30, 49, 32, 56, 2, 6, 15, 41, 53) ~ "West",  
+TRUE ~ NA_character_    
+) 
+) 
+# ------------------------------------------------------------ 
+# 5. Create easier-to-read variables 
+# ------------------------------------------------------------ 
+analysis_df <- mobility %>%   
+transmute(  state, county, state_abbr,  county_name, cz,  czname, share_black2000, share_white2000,      
+  region,
+  mobility_rank_p25 = 100 * kfr_pooled_pooled_p25,    
+  jail_rate_p25 = 100 * jail_pooled_pooled_p25, 
+  poverty_rate_2010 = 100 * poor_share2010,     
+  college_share_2010 = 100 * frac_coll_plus2010,     
+  single_parent_share_2010 = 100 * singleparent_share2010,
+  popdensity2010 = popdensity2010,
+  proportion_black2000= 100 * share_black2000,
+  proportion_white2000= 100 * share_white2000,
+  log_pop_density_2010 = log(popdensity2010 + 1),
+  med_hhinc_2016_1000 = med_hhinc2016 / 1000   ) %>%   
+  drop_na( mobility_rank_p25,
+    proportion_black2000,
+    proportion_white2000,
+    poverty_rate_2010, 
+    college_share_2010, 
+    single_parent_share_2010, 
+    log_pop_density_2010,
+    jail_rate_p25,
+    region
+)
+
+# ------------------------------------------------------------ 
+# 6. Check the sample size and inspect data 
+# ------------------------------------------------------------ 
+nrow(analysis_df) 
+glimpse(analysis_df) 
+``` 
+
+##Research Question:
+
+Using county‑level data from the Opportunity Atlas, can racial composition help explain differences in economic mobility between Black and White males across the United States?
+##Why does this matter?
+
+Racial inequality has shaped American economic outcomes since the nation’s founding..  Differences in economic outcomes and opportunities have been observable for decades. For example, in 2016, the median household income of black Americans was $39,500, compared with $65,000 for non-Hispanic white Americans (Chetty, Hendren, Jones, & Porter, 2019).  In a Liberal Market Economy access to wealth provides the ability to invest into your child at a rate in which those without wealth can not. Measuring Inter generational gaps reveals that market factors like local labor markets, schools, housing markets have different levels of accessibility for black and white males.  This is relevant for economics because the disparity in outcomes between black and white males is a market failure. Understanding how these disparities manifest across counties helps identify structural barriers to opportunity and highlights where policy interventions may be most needed.
+
+##Hypothesis:
+I expect counties with a higher proportion of Black residents to exhibit lower mobility ranks as structural racism  reflected in unequal school quality, limited public resources, and higher rates of single‑parent households constrains economic opportunity and contributes to persistent spatial inequality.
+
+##Data
+
+My data is sourced from the Opportunity Atlas county level outcomes which was constructed by U.S Census Bureau and their collaborators Opportunity Insights.  The data pools together a sample of Americans born between 1978-1995 and measure their outcomes at age 27.  For each county in America children outcomes are measured through several variables including but not limited to job density, commute time and incarceration rates.  They combined four sources of  data housed at the Census Bureau like tax returns and survey data.  Additional county characteristics — such as poverty rates, education levels, and family structure — come from the Opportunity Atlas covariates file. In the context of the data, the unit of observation is a county.  My outcome variable is mobility_rank_p25, this measures the income ranks from children from low income families.  The explanatory variables I will use in my regression models are share_black2000, share_white2000, poverty_rate_2010,  college_share_2010,single_parent_share_2010,log_pop_density_2010, and region.  After removing empty observations the final sample has 3135 observations, far exceeding the minimum needed for experimentation.  
+
+###Summary Statistics 
+This table of observations shows that children raised in low-income families have a mobility rank around 43 percent across counties with a moderate amount of variation shown with a standard deviation of 6.23. In the year 2000, the average proportion of black residents was 8.7 percent.  There is also a high proportion of single-parent households with an average of 30.6 percent.  From this table alone one can deduce a discernible pattern where these explanatory variables provide an obstacle for black populations to achieve upward mobility. 
+``` {r Summary, echo = FALSE}
+library(dplyr)
+library(tidyr)
+
+summary_table <- analysis_df %>%
+  select(
+    mobility_rank_p25,
+    proportion_black2000,
+    proportion_white2000,
+    poverty_rate_2010,
+    college_share_2010,
+    single_parent_share_2010,
+    log_pop_density_2010,
+    jail_rate_p25
+  ) %>%
+  summarise(across(
+    everything(),
+    list(
+      n = ~sum(!is.na(.)),
+      mean = ~mean(., na.rm = TRUE),
+      median = ~median(., na.rm = TRUE),
+      sd = ~sd(., na.rm = TRUE),
+      min = ~min(., na.rm = TRUE),
+      max = ~max(., na.rm = TRUE)
+    )
+  )) %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = c("variable", "stat"),
+    names_pattern = "(.*)_(n|mean|median|sd|min|max)$",
+    values_to = "value"
+  ) %>%
+  pivot_wider(names_from = stat, values_from = value) 
+
+summary_table 
+
+```
+###Visualization 
+The first visualization shows the relationship between mobility ranks and the black population share in 2000.  The downward sloping regression line shows a negative relationship between these two variables.  Counties with a higher share of black people exhibit lower mobility ranks.  While this alone doesn't prove the existence of systemic discrimination a comparison with white counties reveals a stark difference in outcomes.  
+
+The second visualization shows the relationship between county mobility ranks and the proportion of white residents in 2000.  Counties with higher proportions of white residents showed a higher mobility rank with the regression line exhibiting a positive relationship.  The greater mobility ranks in white counties suggests that racial composition in counties does effect mobility outcomes.
+
+The third visualization compares jail rates by race across counties. The box plot is the perfect visual to show that counties with a higher proportion of black residents (top 25% of proportion_black2000) have a remarkably higher incarceration rate than white counties (also top 25% of proportion_white2000).  The median and distribution illuminate a troubling reality where a disproportionate amount of black men are incarcerated, directly limiting the ability of black populations to exhibit income growth. 
+```{r ScatterPlots and Boxplot, echo=FALSE}
+ggplot(analysis_df, aes(
+  x = proportion_black2000,
+  y = mobility_rank_p25,
+  color = proportion_black2000
+)) +
+  geom_point(alpha = 0.6, size = 2) +
+  geom_smooth(method = "lm", se = FALSE, color = "black", linewidth = 1) +
+  labs(
+    title = "County-Level Mobility vs Black Population Share (2000)",
+    subtitle = "Higher Black Share is Associated with Lower Mobility",
+    x = "Proportion Black (2000, %)",
+    y = "Mobility Rank (p25)",
+    color = "Proportion Black (2000, %)"
+  ) +
+  theme_minimal()
+
+ggplot(analysis_df, aes(
+  x = proportion_white2000,
+  y = mobility_rank_p25,
+  color = proportion_white2000
+)) +
+  geom_point(alpha = 0.6, size = 2) +
+  geom_smooth(method = "lm", se = FALSE, color = "black", linewidth = 1) +
+  labs(
+    title = "County-Level Mobility vs White Population Share (2000)",
+    subtitle = "Higher White Share is Associated with Higher Mobility",
+    x = "Proportion White (2000, %)",
+    y = "Mobility Rank (p25)",
+    color = "Proportion White (2000, %)"
+  ) +
+  theme_minimal()
+
+analysis_df <- analysis_df %>%
+  mutate(
+    race_group = case_when(
+      proportion_black2000 >= quantile(proportion_black2000, 0.75) ~ "High Black Share",
+      proportion_white2000 >= quantile(proportion_white2000, 0.75) ~ "High White Share",
+      TRUE ~ "Other"
+    )
+  )
+
+analysis_df %>%
+  filter(race_group %in% c("High Black Share", "High White Share")) %>%
+  ggplot(aes(x = race_group, y = jail_rate_p25, fill = race_group)) +
+  geom_boxplot(alpha = 0.7) +
+  labs(
+    title = "County Incarceration Rates by Racial Composition",
+    subtitle = "Comparing High-Black-Share and High-White-Share Counties",
+    x = "",
+    y = "Incarceration Rate (p25)"
+  ) +
+  scale_fill_manual(values = c("High Black Share" = "#1f77b4",
+                               "High White Share" = "#ff7f0e")) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+###Confidence Interval 
+The confidence interval suggests is clearly a statistically significant difference in mobility outcomes. High white-share counties have a substantially higher mean (46.88929) mobility rank, and there is a Precipitate drop in mean mobility rank when looking at counties with a high share of black adults (37.49114). 95 percent confidence interval: -9.928536 -8.867750 reinforces this interpretation. This implies large, persistent differences in lifetime earnings and opportunity.  
+
+```{r Confidence Interval for Black and White Populations, echo=FALSE}
+library(dplyr)
+
+ci_table <- analysis_df %>%
+  filter(race_group %in% c("High Black Share", "High White Share")) %>%
+  group_by(race_group) %>%
+  summarise(
+    mean_mob = mean(mobility_rank_p25),
+    sd_mob   = sd(mobility_rank_p25),
+    n        = n(),
+    se_mob   = sd_mob / sqrt(n),
+    ci_low   = mean_mob - 1.96 * se_mob,
+    ci_high  = mean_mob + 1.96 * se_mob
+  )
+
+ci_table 
+```
+###Hypothesis Testing 
+
+**Hypothesis**: Average mobility ranks are the same in high black share and high white share counties
+**Null Hypothesis**: Average mobility differs between high black share and high white share counties
+
+*Interpretation*:  The results of the Welch Two Sample t-test say that we reject the null hypothesis and that the alternative hypothesis is statistically significant beyond a shadow of a doubt.  Paired with the results gathered from running a 95% confidence interval and these results show that counties with a high proportion of black adults offer meaningfully lower upward mobility for children from low-income families in comparison to counties with a higher proportion of white adults from low-income families. This test provides strong evidence to support the visualizations shown earlier that depict structural differences across racial groups. 
+```{r Hypothesis Testing, echo=FALSE}
+two_groups <- analysis_df %>%
+  filter(race_group %in% c("High Black Share", "High White Share"))
+
+two_groups %>%
+  group_by(race_group) %>%
+  summarise(
+    n = n(),
+    mean_mobility = mean(mobility_rank_p25),
+    sd_mobility = sd(mobility_rank_p25)
+  )
+
+t.test(mobility_rank_p25 ~ race_group, data = two_groups) 
+```
+
+###Regression
+
+*Interpretation*: The regression models show that even after including explanatory variables that capture the effect of socioeconomic factors that coefficient for black adults in the year 2000 remains negative.  The association between racial composition and mobility is not overwhelmingly caused by differences in socioeconomic or demographic issues or the result of market failure.  These regression models fail to capture the existence of racial bias in helping to determine the outcomes. Higher rates of present fathers, social capital and high trust relationships, and civility contribute to higher mobility rankings. This however is not present in all counties that have a higher proportion of black adults and doesn't overcome the strong predictor that racial composition has on a county's economic mobility. 
+```{r Regression Models, echo=FALSE}
+reg1 <- lm(mobility_rank_p25 ~ proportion_black2000, data = analysis_df)
+summary(reg1) 
+
+reg1 <- lm(mobility_rank_p25 ~ proportion_white2000, data = analysis_df)
+summary(reg1)
+
+reg2 <- lm(
+  mobility_rank_p25 ~ proportion_black2000 +
+    poverty_rate_2010 + college_share_2010 +
+    single_parent_share_2010 + log_pop_density_2010 + region,
+  data = analysis_df
+)
+summary(reg2)
+
+reg2 <- lm(
+  mobility_rank_p25 ~ proportion_white2000 +
+    poverty_rate_2010 + college_share_2010 +
+    single_parent_share_2010 + log_pop_density_2010 + region,
+  data = analysis_df
+)
+summary(reg2)
+
+modelsummary(list("Simple" = reg1, "Multiple" = reg2))
+```
+###Opportunity Score
+*interpretation*: The top 10 Counties outperform their predicted mobility ranks with six of these counties being in the Midwest region.  These counties exhibit more upward mobility than expected based on socioeconomic variables showing that the mobility gap is not solely explained by these variables in the regression models.  An exogenous variable like systemic racial inequality plays a strong component that is unrecognized here in shaping mobility rankings.
+```{r Opportunity Score, echo=FALSE}
+
+analysis_df <- analysis_df %>%
+  mutate(
+    predicted_mobility = predict(reg2),
+    opportunity_score = mobility_rank_p25 - predicted_mobility
+  )
+
+analysis_df %>%
+  arrange(desc(opportunity_score)) %>%
+  select(
+    county_name,
+    state_abbr,
+    region,
+    mobility_rank_p25,
+    predicted_mobility,
+    opportunity_score
+  ) %>%
+  head(10)
+```
